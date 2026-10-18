@@ -363,6 +363,16 @@ void EmulationSession::ShutdownEmulation() {
         m_next_program_index = -1;
     }
 
+    // Ask the guest to exit and let it run its shutdown path while the emulation is still being
+    // presented, so titles can persist their state (save indexes, PlayerPrefs) before teardown.
+    if (m_load_result == Core::SystemResultStatus::Success) {
+        m_system.RequestGuestExit();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
+        while (m_system.IsGuestExitPending() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+
     m_is_running = false;
 
     // Unload user input.

@@ -3,7 +3,9 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -41,6 +43,7 @@
 #include "core/hle/service/am/applet_manager.h"
 #include "core/hle/service/am/frontend/applets.h"
 #include "core/hle/service/am/process_creation.h"
+#include "core/hle/service/am/window_system.h"
 #include "core/hle/service/apm/apm_controller.h"
 #include "core/hle/service/filesystem/filesystem.h"
 #include "core/hle/service/glue/glue_manager.h"
@@ -411,12 +414,52 @@ struct System::Impl {
         return SystemResultStatus::Success;
     }
 
+    void RequestGuestExit() {
+        if (!is_powered_on) {
+            return;
+        }
+
+        // Frontends pause the system before tearing it down, but the guest has to run to flush.
+        if (IsPaused()) {
+            Run();
+        }
+
+        // Move the application to the background first: titles persist their state on that
+        // transition (Unity's FocusStateChanged / OnApplicationPause), and the guest needs a poll
+        // cycle to observe it before the exit request is queued.
+        if (Service::AM::WindowSystem* const window_system = applet_manager.GetWindowSystem();
+            window_system != nullptr) {
+            window_system->OnApplicationBackgrounded();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        // The guest observes this as an applet exit request on its system event; titles use it to
+        // run their shutdown path (e.g. Unity's OnApplicationQuit).
+        applet_manager.RequestExit();
+    }
+
+    bool IsGuestExitPending() const {
+        Service::AM::WindowSystem* const window_system = applet_manager.GetWindowSystem();
+        return window_system != nullptr && window_system->IsApplicationRunning();
+    }
+
+    void RequestAndWaitForGuestExit() {
+        RequestGuestExit();
+
+        const auto deadline = std::chrono::steady_clock::now() + GUEST_EXIT_GRACE_PERIOD;
+        while (IsGuestExitPending() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+
     void ShutdownMainProcess() {
         SetShuttingDown(true);
         Common::ADPF::Shutdown();
 
         // Reset per-game flags
         Settings::values.use_squashed_iterated_blend = false;
+
+        RequestAndWaitForGuestExit();
 
         is_powered_on = false;
         exit_locked = false;
@@ -526,6 +569,9 @@ struct System::Impl {
     std::unique_ptr<Loader::AppLoader> app_loader;
     std::stop_source stop_event;
 
+    /// How long the emulated application may run its shutdown path after an exit request.
+    static constexpr auto GUEST_EXIT_GRACE_PERIOD = std::chrono::milliseconds(1000);
+
     mutable std::mutex suspend_guard;
     std::mutex general_channel_mutex;
     std::mutex nvdec_active_mutex;
@@ -576,6 +622,14 @@ bool System::IsPaused() const {
 
 void System::ShutdownMainProcess() {
     impl->ShutdownMainProcess();
+}
+
+void System::RequestGuestExit() {
+    impl->RequestGuestExit();
+}
+
+bool System::IsGuestExitPending() const {
+    return impl->IsGuestExitPending();
 }
 
 bool System::IsShuttingDown() const {

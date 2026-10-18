@@ -204,8 +204,35 @@ void WindowSystem::OnExitRequested() {
 
     for (const auto& [aruid, applet] : m_applets) {
         std::scoped_lock lk2{applet->lock};
+
+        if (applet.get() == m_application) {
+            // The application is leaving the foreground: titles commonly persist their state on
+            // that transition (Unity's OnApplicationPause) rather than on the exit request itself.
+            applet->lifecycle_manager.SetFocusState(m_system.Kernel(), FocusState::Background);
+            applet->lifecycle_manager.PushUnorderedMessage(m_system.Kernel(),
+                                                          AppletMessage::ChangeIntoBackground);
+        }
+
         applet->lifecycle_manager.RequestExit(m_system.Kernel());
     }
+}
+
+void WindowSystem::OnApplicationBackgrounded() {
+    std::scoped_lock lk{m_lock};
+
+    if (m_application == nullptr) {
+        return;
+    }
+
+    std::scoped_lock lk2{m_application->lock};
+    m_application->lifecycle_manager.SetFocusState(m_system.Kernel(), FocusState::NotInFocus);
+}
+
+bool WindowSystem::IsApplicationRunning() {
+    std::scoped_lock lk{m_lock};
+
+    return m_application != nullptr && m_application->process &&
+           !m_application->process->IsTerminated();
 }
 
 void WindowSystem::SendButtonAppletMessageLocked(AppletMessage message) {

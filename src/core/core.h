@@ -178,6 +178,11 @@ public:
 
     /// Shutdown the main emulated process.
     void ShutdownMainProcess();
+    /// Asks the emulated application to exit (delivered as an applet exit request).
+    /// Frontends should call this while the emulation is still running so the title can
+    /// persist its state, then poll IsGuestExitPending() before tearing the machine down.
+    void RequestGuestExit();
+    bool IsGuestExitPending() const;
 
     /// Check if the core is shutting down.
     [[nodiscard]] bool IsShuttingDown() const;

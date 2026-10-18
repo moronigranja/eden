@@ -4625,7 +4625,8 @@ void MainWindow::RequestGameExit() {
         return;
 
     QtCommon::system->SetExitRequested(true);
-    QtCommon::system->GetAppletManager().RequestExit();
+    // Background first, then the exit request: titles persist their state on the focus transition.
+    QtCommon::system->RequestGuestExit();
 }
 
 void MainWindow::filterBarSetChecked(bool state) {
