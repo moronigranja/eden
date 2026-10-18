@@ -202,9 +202,23 @@ void WindowSystem::OnOperationModeChanged() {
 void WindowSystem::OnExitRequested() {
     std::scoped_lock lk{m_lock};
 
+    bool notified_application = false;
     for (const auto& [aruid, applet] : m_applets) {
         std::scoped_lock lk2{applet->lock};
+        if (applet.get() == m_application) {
+            // Leaving the foreground: titles flush their saved state on this transition.
+            applet->lifecycle_manager.SetFocusState(m_system.Kernel(), FocusState::NotInFocus);
+            notified_application = true;
+            continue;
+        }
         applet->lifecycle_manager.RequestExit(m_system.Kernel());
+    }
+
+    if (notified_application) {
+        // Let the application poll the focus-state change before the exit request is queued:
+        // titles quit on Exit, so queueing both at once would hide the notification.
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        m_application->lifecycle_manager.RequestExit(m_system.Kernel());
     }
 }
 

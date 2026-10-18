@@ -39,6 +39,13 @@ AppletMessage LifecycleManager::PopMessageInOrderOfPriority() {
         return AppletMessage::Resume;
     }
 
+    // Applications receive focus-state changes regardless of the guest's notification opt-in;
+    // titles persist their state (save indexes, PlayerPrefs) on this transition.
+    if (m_is_application && m_has_focus_state_changed) {
+        m_has_focus_state_changed = false;
+        return AppletMessage::FocusStateChanged;
+    }
+
     if (m_has_acknowledged_exit != m_has_requested_exit) {
         m_has_acknowledged_exit = m_has_requested_exit;
         return AppletMessage::Exit;
@@ -57,9 +64,6 @@ AppletMessage LifecycleManager::PopMessageInOrderOfPriority() {
                     ASSERT(false);
                 }
             }
-        } else if (m_has_focus_state_changed) {
-            m_has_focus_state_changed = false;
-            return AppletMessage::FocusStateChanged;
         }
     }
 
